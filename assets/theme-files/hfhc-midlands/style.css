@@ -1,0 +1,22 @@
+/* 
+Theme Name:		 HFHC Midlands
+Theme URI:		 
+Description:	 
+Author:			 
+Author URI:		 
+Template:		 flatsome
+Version:		 1.0.0
+Text Domain:	 Flatsome-child
+-------------------------------------------------------------- */ 
+
+/* =Theme customization starts here
+------------------------------------------------------- */
+
+@font-face {
+  font-family: 'FS_Bold';
+  src: url('./fonts/FSMeWeb-Bold.eot');
+  src: url('./fonts/FSMeWeb-Bold?#iefix') format('embedded-opentype'),
+  url('./fonts/FSMeWeb-Bold.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+}
