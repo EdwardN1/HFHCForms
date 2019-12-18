@@ -8,85 +8,36 @@
 
 
 //The following declaration targets field 36 in form 3 which should be The Employment History List
-add_filter( 'gform_field_validation_3_148', 'validate_employment_history', 10, 4 );
+//add_filter( 'gform_field_validation_3_148', 'validate_employment_history', 10, 4 );
+
+add_filter( 'gform_field_validation', 'substitute_messages', 10, 4 );
+
+function substitute_messages( $result, $value, $form, $field ) {
+	if(! $result['is_valid']) {
+		if($result['message'] == 'Please enter a minimum of 1 another job') {
+			$result['message'] = 'Please add at least one job or break';
+		}
+	}
+
+	return $result;
+}
+
+if(have_rows('check_for_date_gaps_in_these_fields','option')) {
+	while (have_rows('check_for_date_gaps_in_these_fields','option')): the_row();
+		$form_number = get_sub_field('form_number');
+		$field_number = get_sub_field('f_number');
+		add_filter( 'gform_field_validation_'.$form_number.'_'.$field_number, 'validate_employment_history', 10, 4 );
+	endwhile;
+}
 
 function validate_employment_history( $result, $value, $form, $field ) {
-    /*if ( ! $result['is_valid'] && $result['message'] == 'This field is required. Please complete all fields.' ) {
-        //address failed validation because of a required item not being filled out
-        //do custom validation
-        $street  = rgar( $value, $field->id . '.1' );
-        $street2 = rgar( $value, $field->id . '.2' );
-        $city    = rgar( $value, $field->id . '.3' );
-        $state   = rgar( $value, $field->id . '.4' );
-        $zip     = rgar( $value, $field->id . '.5' );
-        $country = rgar( $value, $field->id . '.6' );
-        //check to see if the values you care about are filled out
-        if ( empty( $street ) || empty( $city ) || empty( $state ) ) {
-            $result['is_valid'] = false;
-            $result['message']  = 'This field is required. Please enter at least a street, city, and state.';
-        } else {
-            $result['is_valid'] = true;
-            $result['message']  = '';
-        }
-    }*/
-
-    /**
-     *  We can get the child entries from the cookie:
-     */
-   /* $cookie_name = 'gpnf_form_session_'.$form['id'];
-    if ( isset( $_COOKIE[ $cookie_name ] ) ) {
-        $cookie = json_decode( stripslashes( $_COOKIE[ $cookie_name ] ), true );
-        $eFieldID = $cookie['hash'];
-        if($eFieldID) {
-            $search_criteria = array();
-            $search_criteria['field_filters'][] = array( 'key' => 'gpnf_entry_parent_form', 'value' => $form['id'] );
-            $search_criteria['field_filters'][] = array( 'key' => 'gpnf_entry_parent', 'value' => $eFieldID );
-            $search_criteria['field_filters'][] = array( 'key' => 'gpnf_entry_nested_form_field', 'value' => '148' );
-            $entries = GFAPI::get_entries( '5',$search_criteria);
-            error_log(print_r($entries,true));
-        }
-
-
-    } else {
-        error_log('$cookie_name ' .$cookie_name.' not found :(');
-    }*/
-
-    /**
-     *  Or we can get them from GFFormsModel::get_current_lead()
-     */
-
-    /*$current_form_entry = GFFormsModel::get_current_lead();
-    if($current_form_entry['148']) {
-        $search_criteria = array();
-        $sorting = array( 'key' => '4', 'direction' => 'ASC', 'is_numeric' => false );
-        $search_criteria['field_filters']['mode'] = 'any';
-        $eFieldIDs = explode(',', $current_form_entry['148']);
-        foreach ($eFieldIDs as $eFieldID) {
-            $search_criteria['field_filters'][] = array( 'key' => 'id', 'value' => $eFieldID );
-        }
-        $entries = GFAPI::get_entries( '5',$search_criteria,$sorting);
-        $arr = array();
-
-        foreach ($entries as $entry) {
-            $fromDate = $entry['4']. ' 00:00:00';
-            $toDate = $entry['5']. ' 23:59:59';
-            $arr[] = array('from'=>$fromDate,'to'=>$toDate);
-        }
-
-        if(date_gaps($arr)) {
-            $result['is_valid'] = false;
-            $result['message']  = 'There are gaps in your Employment history please fill these in below.';
-        }
-    }*/
-
-    /**
-     *  Or we can get them from rgpost( 'input_148' )
-     */
-
-    $current_form_entry = rgpost( 'input_148' );
+	if(! $result['is_valid'] && $result['message'] == 'Please enter a minimum of 1 another job.') {
+		$result['message'] = 'Please add at least one job or break';
+	}
+    $current_form_entry = rgpost( 'input_'.$field->id );
     $dob = strtotime(rgpost( 'input_7' ));
     $ageAt18 = strtotime('+18 years',$dob);
-    error_log('DOB = '. date('Y-m-d',$dob).' | at 18 = '.date('Y-m-d',$ageAt18));
+    //error_log('DOB = '. date('Y-m-d',$dob).' | at 18 = '.date('Y-m-d',$ageAt18));
     if($current_form_entry) {
         $search_criteria = array();
         $sorting = array( 'key' => '4', 'direction' => 'ASC', 'is_numeric' => false );
@@ -108,10 +59,17 @@ function validate_employment_history( $result, $value, $form, $field ) {
 	    $fromDate = date('Y-m-d'). ' 00:00:00';
 	    $toDate = date('Y-m-d'). ' 23.59.59';
 	    $arr[] = array('from'=>$fromDate,'to'=>$toDate);
-        if(date_gaps($arr)) {
-            $result['is_valid'] = false;
-            $result['message']  = 'There are gaps in your Employment history. You need to account for all your time in Employment or on a Break since you were 18 years old.';
-        }
+	    //error_log('$entries size = '.sizeof($entries));
+	    if(sizeof($entries!=0)) {
+		    if(date_gaps($arr)) {
+			    $result['is_valid'] = false;
+			    $result['message']  = 'There are gaps in your Employment history. You need to account for all your time in Employment or on a Break since you were 18 years old.';
+		    }
+	    } else {
+		    $result['is_valid'] = false;
+		    $result['message']  = 'Please enter your employment history.';
+	    }
+
     }
 
     return $result;
@@ -123,7 +81,7 @@ function date_gaps($arr) {
         $diff = strtotime ($arr[$i+1]['from']) - strtotime ($arr[$i]['to']);
         If($diff >1){ // if there is more than one second gap
             $gap = true;
-            error_log("key " . $i . " to " . ($i+1) .". Missing " .$diff . " seconds");
+            //error_log("key " . $i . " to " . ($i+1) .". Missing " .$diff . " seconds");
         }
     }
     return $gap;

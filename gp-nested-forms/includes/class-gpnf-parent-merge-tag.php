@@ -4,6 +4,8 @@ class GPNF_Parent_Merge_Tag {
 
 	private static $instance = null;
 
+	public $is_loading_nested_form = false;
+
 	public static function get_instance() {
 		if ( null == self::$instance ) {
 			self::$instance = new self;
@@ -14,23 +16,31 @@ class GPNF_Parent_Merge_Tag {
 
 	private function __construct() {
 
-		add_action( 'gpnf_load_nested_form_hooks', array( $this, 'load_hooks' ) );
-
-	}
-
-	public function load_hooks() {
+		add_action( 'gpnf_load_nested_form_hooks', array( $this, 'set_context' ) );
+		add_action( 'gpnf_unload_nested_form_hooks', array( $this, 'set_context' ) );
 
 		add_filter( 'gform_field_input', array( $this, 'select_value_data_attr' ), 11, 5 );
 
+	}
+
+	public function set_context() {
+		$this->is_loading_nested_form = current_action() === 'gpnf_load_nested_form_hooks';
 	}
 
 	public function parse_parent_merge_tag( $text, $form, $entry, $url_encode, $esc_html, $nl2br, $format ) {
 		preg_match_all( "/\{\%GPNF:Parent:(.*?)\%\}/", $text, $parent_matches, PREG_SET_ORDER );
 
 		if ( ! empty( $parent_matches ) ) {
+
 			$parent_form_id = rgar( $entry, 'gpnf_entry_parent_form' );
 			$parent_form    = GFAPI::get_form( $parent_form_id );
 			$parent_entry   = GFAPI::get_entry( rgar( $entry, 'gpnf_entry_parent' ) );
+
+			// In some cases (child notifications, Gravity Flow), the {Parent} merge tag can be called before the parent
+			// entry has been submitted. In these cases, provide a fake parent entry to hush the fuss.
+			if( is_wp_error( $parent_entry ) ) {
+				$parent_entry = array( 'id' => null );
+			}
 
 			foreach ( $parent_matches as $match ) {
 				$full_tag = $match[0];
@@ -70,6 +80,25 @@ class GPNF_Parent_Merge_Tag {
 			return $input_html;
 		}
 
+		// If we are loading this form outside of the nested context, remove the {Parent} merge tag completely.
+		// We could technically return immediately after fetching the updated input HTML below but it doesn't hurt and
+		// keeps the code simpler.
+		if( ! $this->is_loading_nested_form ) {
+			if ( is_array( $field->inputs ) ) {
+				$inputs = $field->inputs;
+				foreach ( $inputs as $input ) {
+					$default_value = rgar( $input, 'defaultValue' );
+					if ( stripos( $default_value, '{Parent' ) !== false && $default_value == rgar( $value, $input['id'] ) ) {
+						$input['defaultValue'] = $value = '';
+						break;
+					}
+				}
+				$field->inputs = $inputs;
+			} elseif ( $field->defaultValue == $value ) {
+				$field->defaultValue = $value = '';
+			}
+		}
+
 		remove_filter( 'gform_field_input', array( $this, 'select_value_data_attr' ), 11 );
 		$input_html = GFCommon::get_field_input( $field, $value, $entry_id, $form_id, GFAPI::get_form( $form_id ) );
 		add_filter( 'gform_field_input', array( $this, 'select_value_data_attr' ), 11, 5 );
@@ -83,7 +112,19 @@ class GPNF_Parent_Merge_Tag {
 				continue;
 			}
 
+			$input_form_id = array_slice( explode( '_', $match[2] ), 0, 1 );
+
+			if ( count( $input_form_id ) ) {
+				$input_form_id = $input_form_id[0];
+			} else {
+				$input_form_id = null;
+			}
+
 			$input_id = join( '.', array_slice( explode( '_', $match[2] ), 1 ) );
+
+			if ( $form_id != $input_form_id ) {
+				continue;
+			}
 
 			/**
 			 * Reason for this conditional:
@@ -105,10 +146,10 @@ class GPNF_Parent_Merge_Tag {
 
 			/* If there's a submitted value, add additional attribute to
 			prevent the value from changing back to the parent. */
-			$submitted_value = rgpost( 'input_' . $input_id );
+			$submitted_value = rgpost( 'gform_submit' ) == $input_form_id ? rgpost( 'input_' . $input_id ) : null;
 
 			if ( $submitted_value && stripos( $submitted_value, '{Parent' ) === false ) {
-				$replace = $match[0] . ' data-gpnf-changed="true"';
+				$replace = $replace . ' data-gpnf-changed="true"';
 			}
 
 			$input_html = str_replace( $search, $replace, $input_html );

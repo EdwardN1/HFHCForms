@@ -16,181 +16,326 @@
 
 		self.init = function() {
 
+			self.id = self.getDebugId();
+
+			self.initSession();
+
 			// Handle init when form is reloaded via AJAX.
 			if( typeof window[ 'GPNestedForms_{0}_{1}'.format( self.formId, self.fieldId ) ] !== 'undefined' ) {
 				var oldGPNF = window[ 'GPNestedForms_{0}_{1}'.format( self.formId, self.fieldId ) ];
 				self.entries = oldGPNF.entries;
+				oldGPNF.modal.destroy();
+				$( document ).off( '.{0}'.format( self.getNamespace() ) );
 				gform.removeFilter( 'gform_calculation_formula', 10, 'gpnf_{0}_{1}'.format( self.formId, self.fieldId ) );
 				/* Hack: fixes issue when Beaver Builder triggers ready event again without reloading UI */
 				self.viewModel = oldGPNF.viewModel;
 			}
 
-			self.parentFormContainer = $( '#gform_wrapper_' + self.formId );
-			self.fieldContainer      = $( '#field_' + self.formId + '_' + self.fieldId );
-			self.modalElem           = $( '.gpnf-nested-form-' + self.formId + '-' + self.fieldId );
-			self.editDialogElem      = $( '.gpnf-edit-form-' + self.formId + '-' + self.fieldId );
-			self.formHtml            = self.getFormHtml();
-			self.entriesInput        = $( '#input_' + self.formId + '_' + self.fieldId );
-			self.scrollY             = 0;
-			self.modalArgs = gform.applyFilters( 'gpnf_modal_args', {
-				autoOpen: false,
-				modal: true,
-				width: self.modalWidth < $( document ).width() ? self.modalWidth : $( document ).width() - 40,
-				height: self.modalHeight,
-				title: self.modalTitle,
-				closeText: 'Close',
-				buttons: { },
-				position: self.getPosition(),
-				dialogClass: self.modalClass,
-				draggable: false,
-				resizable: false,
-				close: function( event, ui ) {
-					// Any time either dialog is closed, remove the dialog's form completely from the UI so there are
-					// never two of the same form on the page at the same time.
-					self.modalDialog.html( '' );
-					self.editDialog.html( '' );
-					$( '.ui-widget-overlay' ).removeClass( self.modalClass );
-					window.scroll( 0, self.scrollY );
-				},
-				open: function() {
+			self.$parentFormContainer = $( '#gform_wrapper_{0}'.format( self.formId ) );
+			self.$fieldContainer      = $( '#field_{0}_{1}'.format( self.formId, self.fieldId ) );
+			self.$modalSource         = $( '.gpnf-nested-form-{0}-{1}'.format( self.formId, self.fieldId ) );
+			self.formHtml             = self.getFormHtml();
 
-					if( self.modalHeaderColor ) {
-						self.modalDialog.siblings( '.ui-dialog-titlebar' ).css( 'background-color', self.modalHeaderColor );
-						self.editDialog.siblings( '.ui-dialog-titlebar' ).css( 'background-color', self.modalHeaderColor );
-					}
-
-					$( '.ui-widget-overlay' ).addClass( self.modalClass );
-
-					if( self.hasConditionalLogic ) {
-
-						$( document ).on( 'gform_post_conditional_logic', function( event, formId ) {
-							if( self.nestedFormId == formId ) {
-								self.repositionModals();
-							}
-						} );
-
-					} else {
-
-						self.repositionModals();
-
-					}
-
-				}
-			}, self.formId, self.fieldId, self );
-
-			/**
-			 * Fix conflict when Bootstrap is loaded AFTER jQuery UI; the close button on jQuery UI does not appear.
-			 * https://stackoverflow.com/questions/17367736/jquery-ui-dialog-missing-close-icon
-			 */
-			if( $.fn.button.noConflict ) {
-				$.fn.bootstrapBtn = $.fn.button.noConflict();
-			}
-
-			self.modalDialog = self.modalElem.dialog( self.modalArgs );
-			self.editDialog  = self.editDialogElem.dialog( $.extend( {}, self.modalArgs, { title: self.editModalTitle } ) );
-
-			if( ! self.isBound( self.fieldContainer[0] ) ) {
-				self.viewModel = new EntriesModel( self.prepareEntriesForKnockout( self.entries ), self );
-				ko.applyBindings( self.viewModel, self.fieldContainer[0] );
-			}
-
-			// Click handler for add entry button.
-			$( document ).on( 'click', '#field_' + self.formId + '_' + self.fieldId + ' .gpnf-add-entry', function( event ) {
-
-				event.preventDefault();
-
-				// Save scroll position so we can return to it when closing the modal.
-				self.scrollY = window.scrollY ? window.scrollY : window.pageYOffset;
-
-				self.modalElem.html( self.formHtml );
-				self.modalDialog.dialog( 'open' );
-				self.initFormScripts();
-				self.modalElem.find( 'input[name="gpnf_nested_form_field_id"]' ).val( self.fieldId );
-
-			} );
-
-			// Re-init modaled forms; 'gpnf_post_render' triggered on any nested form's first load every time a nested
-			// form is retrieved via ajax (aka editing, first load and each page load).
-			$( document ).bind( 'gpnf_post_render', function( event, formId, currentPage ) {
-
-				var $nestedForm = $( '#gform_wrapper_' + formId );
-				if( formId == self.nestedFormId && $nestedForm.length > 0 ) {
-					$( document ).trigger( 'gform_post_render', [ self.nestedFormId, currentPage ] );
-				}
-
-                self.handleParentMergeTag();
-				self.repositionModals();
-
-			} );
-
-			// Reposition modals when window is resized.
-			$( window ).resize( function() {
-				self.repositionModals();
-			} );
-
-			// Init calculation functionality.
-			gform.addFilter( 'gform_calculation_formula', self.parseCalcs, 10, 'gpnf_{0}_{1}'.format( self.formId, self.fieldId ) );
-
-			self.runCalc( self.formId );
-
-			self.parentFormContainer.data( 'GPNestedForms_' + self.fieldId, self );
+			self.initModal();
+			self.addColorStyles();
+			self.initKnockout();
+			self.initCalculations();
 
 			window[ 'GPNestedForms_{0}_{1}'.format( self.formId, self.fieldId ) ] = self;
 
 		};
 
-		self.repositionModals = function() {
+		self.initSession = function() {
+			$.post( self.ajaxUrl, self.sessionData, function( response ) { } );
+		};
 
-			// Repositioning the modal will scroll the body up to the top of the modal. This isn't a problem for small
-			// modals but for large models that exceed the height of the window, this creates a very confusing UX.
-			// Solution? The getPosition() method will now determine if the modal is larger than than window and return
-			// a "dnr" (do not reposition) property.
-			var position = self.getPosition( self.modalDialog );
-			if( ! position.dnr ) {
-				self.modalDialog.dialog( 'option', 'position', position );
+		self.initModal = function() {
+
+			self.modalArgs = gform.applyFilters( 'gpnf_modal_args', {
+				labels: self.modalLabels,
+				colors: self.modalColors,
+				footer: true,
+				stickyFooter: self.modalStickyFooter,
+				closeMethods: [ 'button' ],
+				cssClass: [ self.modalClass, 'gpnf-modal', 'gpnf-modal-{0}-{1}'.format( self.formId, self.fieldId ) ],
+				onOpen: function() { },
+				onClose: function() {
+					self.clearModalContent();
+				},
+				beforeOpen: function() { },
+				beforeClose: function() { return true; }
+			}, self.formId, self.fieldId, self );
+
+			if( self.modal ) {
+				self.$modal = $( self.modal.modal );
+				return;
 			}
 
-			position = self.getPosition( self.editDialog );
-			if( ! position.dnr ) {
-				self.editDialog.dialog( 'option', 'position', position );
-			}
+			self.modal = new tingle.modal( self.modalArgs );
+			self.$modal = $( self.modal.modal );
 
+			self.bindResizeEvents();
+
+			// Re-init modaled forms; 'gpnf_post_render' triggered on any nested form's first load every time a nested
+			// form is retrieved via ajax (aka editing, first load and each page load).
+			$( document ).on( 'gpnf_post_render.{0}'.format( self.getNamespace() ), function( event, formId, currentPage ) {
+
+				var $nestedForm = $( '#gform_wrapper_' + formId );
+
+				if( formId == self.nestedFormId && $nestedForm.length > 0 ) {
+
+					$( document ).trigger( 'gform_post_render', [ self.nestedFormId, currentPage ] );
+
+					self.scrollToTop();
+
+					// Don't re-init buttons on the confirmation page; currentPage is undefined on the confirmation page.
+					if( currentPage ) {
+						self.handleParentMergeTag();
+						self.addModalButtons();
+						self.observeDefaultButtons();
+					}
+
+				}
+
+			} );
 
 		};
 
-		self.getPosition = function( $dialog ) {
+		self.initKnockout = function() {
 
-			if( ! $dialog ) {
-				return { my: 'center', at: 'center', of: window };
+			// Click handler for add entry button.
+			$( document ).on( 'click.{0}'.format( self.getNamespace() ), '#field_{0}_{1} .gpnf-add-entry'.format( self.formId, self.fieldId ), self.openAddModal );
+
+			// Setup Knockout to handle our Nested Form field entries.
+			if( ! self.isBound( self.$fieldContainer[0] ) ) {
+				self.viewModel = new EntriesModel( self.prepareEntriesForKnockout( self.entries ), self );
+				ko.applyBindings( self.viewModel, self.$fieldContainer[0] );
 			}
 
-			var windowHeight   = $( window ).height(),
-				/*documentHeight = $( document ).height(),*/
-				modalHeight    = $dialog.parents( '.ui-dialog' ).height(),
-				alignment      = 'center',
-			    of             = window,
-				dnr            = false;
+		};
 
-			/*if ( modalHeight >= documentHeight ) {
-				alignment = 'center top';
-				of = document;
-				$dialog.data( 'do-not-reposition', false );
-			} else */
-			if ( modalHeight >= windowHeight ) {
-				alignment = 'center top';
-				of = window;
-				if( $dialog.data( 'do-not-reposition' ) ) {
-					dnr = true;
-				} else {
-					$dialog.data( 'do-not-reposition', true );
-				}
+		self.initCalculations = function() {
+
+			gform.addFilter( 'gform_calculation_formula', self.parseCalcs, 10, 'gpnf_{0}_{1}'.format( self.formId, self.fieldId ) );
+			self.runCalc( self.formId );
+
+		};
+
+		self.openAddModal = function( event ) {
+
+			event.preventDefault();
+
+			self.setModalContent();
+			self.openModal();
+
+		};
+
+		self.openModal = function() {
+			self.modal.open();
+			self.initFormScripts();
+		};
+
+		self.scrollToTop = function() {
+			// Scroll back to the top of the modal when a new page is loaded or there is a validation error.
+			var modalContainerNode = $( self.modal.modal )[0];
+			if( modalContainerNode.scroll ) {
+				modalContainerNode.scroll( { top: 0, left: 0, behavior: 'smooth' } );
 			} else {
-				$dialog.data( 'do-not-reposition', false );
+				modalContainerNode.scrollTop = 0;
+			}
+		};
+
+		self.observeDefaultButtons = function() {
+			var observer = self.getDefaultButtonObserver();
+			self.getDefaultButtons().each( function() {
+				observer.observe( $( this )[0], { attributes: true, childList: true } );
+			} );
+		};
+
+		self.getDefaultButtonObserver = function() {
+			return new MutationObserver( function( mutations ) {
+				mutations.forEach(function(mutation) {
+					if( mutation.type == 'attributes' && mutation.attributeName == 'style' ) {
+						self.addModalButtons();
+					}
+				} );
+			} );
+		};
+
+		self.setModalContent = function( html, mode ) {
+
+			self.setMode( typeof mode === 'undefined' ? 'add' : 'edit' );
+
+			$( self.modal.modalBoxContent )
+				.html( typeof html !== 'undefined' ? html : self.formHtml )
+				.prepend( '<div class="gpnf-modal-header" style="background-color:{1}">{0}</div>'.format( self.getModalTitle(), self.modalHeaderColor ) );
+
+			self.$modal.find( 'input[name="gpnf_nested_form_field_id"]' ).val( self.fieldId );
+
+			self.addModalButtons();
+			self.stashFormData();
+
+			var observer = self.getDefaultButtonObserver();
+			self.getDefaultButtons().each( function() {
+				observer.observe( $( this )[0], { attributes: true, childList: true } );
+			} );
+
+		};
+
+		self.clearModalContent = function() {
+			$( self.modal.modalBoxContent ).html( '' );
+		};
+
+		self.setMode = function( mode ) {
+			self.mode = mode;
+		};
+
+		self.getMode = function() {
+			return self.mode ? self.mode : 'add';
+		};
+
+		self.getModalTitle = function() {
+			return self.getMode() === 'add' ? self.modalArgs.title : self.modalArgs.editTitle;
+		};
+
+		self.addModalButtons = function() {
+
+			self.modal.modalBoxFooter.innerHTML = '';
+
+			self.modal.addFooterBtn( self.modalArgs.labels.cancel, 'tingle-btn tingle-btn--default gpnf-btn-cancel', function() {
+				self.handleCancelClick( $( this ) );
+			} );
+
+			self.getDefaultButtons().each( function() {
+				var $button = $( this );
+				if( $button.css( 'display' ) !== 'none' ) {
+
+					var label   = $button.attr( 'type' ) === 'submit' ? self.getModalTitle() : $button.val(),
+						classes = [ 'tingle-btn', 'tingle-btn--primary' ];
+
+					if( $button.hasClass( '.gform_previous_button' ) ) {
+						classes.push( 'gpnf-btn-previous' );
+					} else if( $button.hasClass( '.gform_next_button' ) ) {
+						classes.push( 'gpnf-btn-next' );
+					} else {
+						classes.push( 'gpnf-btn-submit' );
+					}
+
+					self.modal.addFooterBtn( label, classes.join( ' ' ), function( event ) {
+						$( event.target ).addClass( 'gpnf-spinner' );
+						$button.click();
+					} );
+
+				}
+			} );
+
+			self.modal.addFooterBtn( self.modalArgs.labels.cancel, 'tingle-btn tingle-btn--default gpnf-btn-cancel-mobile', function() {
+				self.handleCancelClick( $( this ) );
+			} );
+
+			// If we're in edit mode - AND - there is a form, show the delete button. Otherwise, we're showing an error message.
+			if( self.mode == 'edit' && $( self.modal.modalBoxContent ).find( '.gform_wrapper' ).length > 0 ) {
+				self.modal.addFooterBtn( self.modalArgs.labels.delete, 'tingle-btn tingle-btn--danger tingle-btn--pull-left gpnf-btn-delete', function() {
+					var $button = $( this );
+					if ( ! $button.data( 'isConfirming' ) ) {
+						$button
+							.data( 'isConfirming', true )
+							.text( self.modalArgs.labels.confirmAction );
+						setTimeout( function() {
+							$button
+								.data( 'isConfirming', false )
+								.text( self.modalArgs.labels.delete );
+						}, 3000 );
+					} else {
+						self.getEntryRow( self.getCurrentEntryId() ).find( '.delete a' ).click();
+						self.modal.close();
+					}
+				} );
 			}
 
-			var position = { my: alignment, at: alignment, of: of, dnr: dnr };
+		};
 
-			return position;
+		self.addColorStyles = function() {
+
+			if( self.$style ) {
+				self.$style.remove();
+			}
+
+			self.$style = '<style type="text/css"> \
+					.gpnf-modal-{0}-{1} .tingle-btn--primary { background-color: {2}; } \
+					.gpnf-modal-{0}-{1} .tingle-btn--default { background-color: {3}; } \
+					.gpnf-modal-{0}-{1} .tingle-btn--danger { background-color: {4}; } \
+				</style>'.format( self.formId, self.fieldId, self.modalArgs.colors.primary, self.modalArgs.colors.secondary, self.modalArgs.colors.danger );
+
+			$( 'head' ).append( self.$style );
+
+		};
+
+		self.getDefaultButtons = function() {
+			return $( '#gform_page_{0}_{1} .gform_page_footer, #gform_{0} .gform_footer'.format( self.nestedFormId, self.getCurrentPage() ) ).find( 'input[type="button"], input[type="submit"]' );
+		};
+
+		self.handleCancelClick = function( $button ) {
+			if ( $button.data( 'isConfirming' ) ) {
+				self.modal.close();
+			} else if ( self.hasChanges() ) {
+				$button
+					.data( 'isConfirming', true )
+					.removeClass( 'tingle-btn--default' )
+					.addClass( 'tingle-btn--danger' )
+					.text( self.modalArgs.labels.confirmAction );
+				setTimeout( function() {
+					$button
+						.data( 'isConfirming', false )
+						.removeClass( 'tingle-btn--danger' )
+						.addClass( 'tingle-btn--default' )
+						.text( self.modalArgs.labels.cancel );
+				}, 3000 );
+			} else {
+				self.modal.close();
+			}
+		};
+
+		self.setMode = function( mode ) {
+			self.mode = mode;
+		};
+
+		self.getMode = function() {
+			return self.mode ? self.mode : 'add';
+		};
+
+		self.getModalTitle = function() {
+			return self.getMode() === 'add' ? self.modalTitle : self.editModalTitle;
+		};
+
+		self.stashFormData = function() {
+			self.formData = self.$modal.find( 'form' ).serialize();
+		};
+
+		self.hasChanges = function() {
+			return self.$modal.find( 'form' ).serialize() !== self.formData;
+		};
+
+		self.bindResizeEvents = function() {
+
+			$( document ).on( 'gpnf_post_render.{0}'.format( self.getNamespace() ), function() {
+				self.modal.checkOverflow();
+			} );
+
+			$( document ).on( 'gform_post_conditional_logic.{0}'.format( self.getNamespace() ), function( event, formId ) {
+				if( self.nestedFormId == formId ) {
+					self.modal.checkOverflow();
+				}
+			} );
+
+			gform.addAction( 'gform_list_post_item_add', function() {
+				self.modal.checkOverflow();
+			} );
+
+			gform.addAction( 'gform_list_post_item_delete', function() {
+				self.modal.checkOverflow();
+			} );
+
 		};
 
 		self.isBound = function( elem ) {
@@ -237,7 +382,7 @@
 
         self.editEntry = function( entryId, $trigger ) {
 
-        	var $spinner = new AjaxSpinner( $trigger, false, '' );
+        	var $spinner = new AjaxSpinner( $trigger, self.spinnerUrl, '' );
 	        $trigger.css( { visibility: 'hidden' } );
 
             $.post( self.ajaxUrl, {
@@ -251,13 +396,8 @@
             	$spinner.destroy();
 	            $trigger.css( { visibility: 'visible' } );
 
-				// Save scroll position so we can return to it when closing the modal.
-				self.scrollY = window.scrollY ? window.scrollY : window.pageYOffset;
-
-                self.editDialog
-	                .html( response )
-	                .dialog( 'open' );
-
+	            self.setModalContent( response, 'edit' );
+	            self.modal.open();
                 self.initFormScripts();
 
             } );
@@ -266,7 +406,7 @@
 
         self.deleteEntry = function( item, $trigger ) {
 
-	        var $spinner = new AjaxSpinner( $trigger, false, '' );
+	        var $spinner = new AjaxSpinner( $trigger, self.spinnerUrl, '' );
 	        $trigger.css( { visibility: 'hidden' } );
 
         	$.post( self.ajaxUrl, {
@@ -298,73 +438,30 @@
         self.getFormHtml = function() {
 
             // check stash for HTML first, required for AJAX-enabled parent forms
-            var formHtml = self.modalElem.data( 'formHtml' );
+            var formHtml = self.$modalSource.data( 'formHtml' );
             if( ! formHtml ) {
-                formHtml = self.modalElem.html();
+                formHtml = self.$modalSource.html();
             }
 
             // stash for AJAX-enabled parent forms
-            self.modalElem.data( 'formHtml', formHtml );
+            self.$modalSource.data( 'formHtml', formHtml );
 
             // clear the existing markup to prevent tabindex and script conflicts from multiple IDs existing in the same DOM
-            self.modalElem.html( '' );
+            self.$modalSource.html( '' );
 
             return formHtml;
         };
 
-        self.handleParentMergeTag = function () {
-
-            self.modalElem.find(':input').each(function () {
-                var $this = $(this);
-                var value = $this.data('gpnf-value');
-
-                if ($this.data('gpnf-changed')) {
-                    return true;
-                }
-
-                if (!value) {
-                    return true;
-                }
-
-                var parentMergeTagMatches = /{Parent:(\d+(\.\d+)?)}/gi.exec(value);
-
-                if (!parentMergeTagMatches) {
-                    return true;
-                }
-
-                var inputId = parentMergeTagMatches[1];
-
-                if (isNaN(inputId)) {
-                    return true;
-                }
-
-                var $parentInput = self.parentFormContainer.find('#input_' + self.formId + '_' + inputId.split('.').join('_'));
-                if( $parentInput.hasClass( 'gfield_radio' ) ) {
-					$parentInput = $parentInput.find( 'input:checked' );
-				}
-
-                var currentValue = $(this).val(),
-                    parentValue = $parentInput.val();
-
-                if (currentValue != parentValue) {
-                    $(this).val(parentValue).change();
-                }
-
-                $(this).on('change', function () {
-                    $(this).data('gpnf-changed', true);
-                });
-            });
-
-        };
-
         self.initFormScripts = function( currentPage ) {
-            // @todo: add support for multi-page forms by updating "1" to the currrent page ID
-            $(document).trigger( 'gform_post_render', [ self.nestedFormId, 1 ] );
+
+            $( document ).trigger( 'gform_post_render', [ self.nestedFormId, 1 ] );
+
             if( window['gformInitDatepicker'] ) {
                 gformInitDatepicker();
             }
 
             self.handleParentMergeTag();
+
         };
 
 		/**
@@ -420,6 +517,85 @@
 			return formula;
 		};
 
+		self.handleParentMergeTag = function () {
+
+			self.$modal.find(':input').each(function () {
+				var $this = $(this);
+				var value = $this.data('gpnf-value');
+
+				if ($this.data('gpnf-changed')) {
+					return true;
+				}
+
+				if (!value) {
+					return true;
+				}
+
+				var parentMergeTagMatches = /{Parent:(\d+(\.\d+)?)}/gi.exec(value);
+
+				if (!parentMergeTagMatches) {
+					return true;
+				}
+
+				var inputId = parentMergeTagMatches[1];
+
+				if (isNaN(inputId)) {
+					return true;
+				}
+
+				var $parentInput = self.$parentFormContainer.find('#input_' + self.formId + '_' + inputId.split('.').join('_'));
+				if( $parentInput.hasClass( 'gfield_radio' ) ) {
+					$parentInput = $parentInput.find( 'input:checked' );
+				}
+
+				var currentValue = $(this).val(),
+					/**
+					 * Filter the value of the parent merge tag before it is replaced in the field.
+					 *
+					 * @since 1.0-beta-8.0
+					 *
+					 * @param string          value           Value that will replace the parent merge tag in the field.
+					 * @param float           inputId         ID of the field/input targeted by the parent merge tag.
+					 * @param int             formId          ID of the current form.
+					 * @param {GPNestedForms} gpnf            Current instance of the GPNestedForms object.
+					 */
+					parentValue = gform.applyFilters( 'gpnf_parent_merge_tag_value', $parentInput.val(), inputId, self.formId, self );
+
+				if (currentValue != parentValue) {
+					$(this).val(parentValue).change();
+				}
+
+				$(this).on('change', function () {
+					$(this).data('gpnf-changed', true);
+				});
+			});
+
+		};
+
+		self.getCurrentPage = function() {
+			var currentPage = $( '#gform_source_page_number_{0}'.format( self.nestedFormId ) ).val();
+			return Math.max( 1, parseInt( currentPage ) );
+		};
+
+		self.getCurrentEntryId = function() {
+			return self.$modal.find( 'input[name="gpnf_entry_id"]' ).val()
+		};
+
+		self.getEntryRow = function( entryId ) {
+			return $( '.gpnf-nested-entries [data-entryid="' + entryId + '"]' );
+		};
+
+		self.getDebugId = function() {
+			return 'xxxxxxxx'.replace( /[xy]/g, function ( c ) {
+				var r = Math.random() * 16 | 0, v = c == 'x' ? r : r & 0x3 | 0x8;
+				return v.toString( 16 );
+			} );
+		};
+
+		self.getNamespace = function() {
+			return 'gpnf-{0}-{1}'.format( self.formId, self.fieldId );
+		};
+
 		/**
 		 * Static function called via the confirmation of the nested form. Loads the newly created entry into the
 		 * Nested Form field displayed on the parent form.
@@ -428,7 +604,8 @@
 		 */
 		GPNestedForms.loadEntry = function( args ) {
 
-			var gpnf = $( '#gform_wrapper_' + args.formId ).data( 'GPNestedForms_' + args.fieldId );
+			/** @var \GPNestedForms gpnf */
+			var gpnf = window[ 'GPNestedForms_{0}_{1}'.format( args.formId, args.fieldId ) ];
 
 			entry = gpnf.prepareEntryForKnockout( args.fieldValues );
 			entry.id = args.entryId;
@@ -437,26 +614,24 @@
 			if( args.mode == 'edit' ) {
 
 				// get index of entry
-				var entryEditing = $( 'table.gpnf-nested-entries [data-entryid="' + entry.id + '"]' );
+				var entryEditing = self.getEntryRow( entry.id );
 				var replacementIndex = entryEditing.index();
 
 				// remove old entry, add updated
 				gpnf.viewModel.entries.remove( function( item ) { return item.id == entry.id } );
 				gpnf.viewModel.entries.splice( replacementIndex, 0, entry );
 
-				// close dialog
-				gpnf.editDialog.dialog( 'close' );
-
 			}
 			// add
 			else {
 
-				gpnf.modalDialog.dialog( 'close' );
-				gpnf.viewModel.entries.push( entry );
 
-				self.refreshMarkup();
+				gpnf.viewModel.entries.push( entry );
+				gpnf.refreshMarkup();
 
 			}
+
+			gpnf.modal.close();
 
 		};
 
@@ -471,7 +646,9 @@
         self.entries = ko.observableArray( entries );
 
         self.isMaxed = ko.computed( function() {
-	        return gpnf.entryLimitMax !== '' && self.entries().length >= gpnf.entryLimitMax;
+        	var max = gform.applyFilters( 'gpnf_entry_limit_max', gpnf.entryLimitMax, gpnf.formId, gpnf.fieldId, gpnf );
+
+	        return max !== '' && self.entries().length >= max;
         } );
 
         self.entryIds = ko.computed( function() {
@@ -496,7 +673,7 @@
 
         self.deleteEntry = function( item, event ) {
 			gpnf.deleteEntry( item, $( event.target ) );
-        }
+        };
 
     };
 
@@ -547,7 +724,7 @@
 
 	function AjaxSpinner( elem, imageSrc, inlineStyles ) {
 
-		imageSrc     = typeof imageSrc == 'undefined' || ! imageSrc ? gf_global.base_url + '/images/spinner.gif': imageSrc;
+		imageSrc     = typeof imageSrc == 'undefined' || ! imageSrc ? gf_global.base_url + '/images/spinner.gif' : imageSrc;
 		inlineStyles = typeof inlineStyles != 'undefined' ? inlineStyles : '';
 
 		this.elem = elem;

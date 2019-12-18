@@ -16,7 +16,10 @@
 		<tbody data-bind="visible: entries().length > 0, foreach: entries">
 		<tr data-bind="attr: { 'data-entryid': id }">
 			<?php foreach( $nested_fields as $nested_field ): ?>
-				<td class="gpnf-field" data-bind="html: f<?php echo $nested_field['id']; ?>.label">&nbsp;</td>
+				<td class="gpnf-field"
+					data-bind="html: f<?php echo $nested_field['id']; ?>.label, attr: { 'data-value': f<?php echo $nested_field['id']; ?>.label }"
+					data-heading="<?php echo GFCommon::get_label( $nested_field ); ?>"
+				>&nbsp;</td>
 			<?php endforeach; ?>
 			<td class="gpnf-row-actions">
 				<ul>
@@ -38,5 +41,6 @@
 	</table>
 
 	<?php echo $add_button; ?>
+	<?php echo $add_button_message; ?>
 
 </div>

@@ -45,7 +45,7 @@ class GPNF_Zapier {
 		$_entry = new GPNF_Entry( $entry );
 		$child_entries = $_entry->get_child_entries();
 		foreach( $child_entries as $child_entry ) {
-			$form = GFAPI::get_form( $child_entry['form_id'] );
+			$form = gp_nested_forms()->get_nested_form( $child_entry['form_id'] );
 			GFZapier::send_form_data_to_zapier( $child_entry, $form );
 		}
 
