@@ -6379,3 +6379,8 @@ svg {
 .gallery-item > div > a:focus {
   box-shadow: 0 0 0 2px #0073aa;
 }
+
+/* Components */
+.ui-datepicker {
+  margin-top: -20px;
+}

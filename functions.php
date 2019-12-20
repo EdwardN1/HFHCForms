@@ -224,6 +224,9 @@ add_action('after_setup_theme', 'twentynineteen_content_width', 0);
  */
 function twentynineteen_scripts()
 {
+    wp_enqueue_script('datepicker-stuff', get_theme_file_uri('/js/datepickers.js'), array('jquery'), '1.1', true);
+    wp_enqueue_style( 'global-css', get_template_directory_uri() . '/global-styles.css', array(), filemtime(get_template_directory() . '/global-styles.css'), 'all' );
+
     if (basename(get_page_template()) == 'hfhcmidlands-page.php') {
 
     } else {
@@ -251,6 +254,8 @@ function twentynineteen_scripts()
     if (is_singular() && comments_open() && get_option('thread_comments')) {
         wp_enqueue_script('comment-reply');
     }
+
+
 }
 
 add_action('wp_enqueue_scripts', 'twentynineteen_scripts');

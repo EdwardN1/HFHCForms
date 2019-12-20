@@ -1,0 +1,6 @@
+html body div#ui-datepicker-div[style] {
+    margin-top: -20px;
+}
+.breadcrumb {
+    display: none;
+}
